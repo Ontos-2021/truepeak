@@ -14,15 +14,19 @@
             <div class="col-md-6">
                 <form method="POST" enctype="multipart/form-data" class="mb-3">
                     <div class="mb-3">
-                        <label for="file" class="form-label">Upload your audio file:</label>
-                        <input type="file" class="form-control" id="file" name="file" required>
+                        <label for="file" class="form-label">Upload your audio files:</label>
+                        <input type="file" class="form-control" id="file" name="file" multiple required>
                     </div>
-                    <button type="submit" class="btn btn-primary">Analyze True Peak</button>
+                    <button type="submit" class="btn btn-primary">Analyze True Peaks</button>
                 </form>
-                {% if result is not none %}
-                <div class="alert alert-info" role="alert">
-                    The true peak of the audio file is: {{ result }}
-                </div>
+                {% if results %}
+                <ul class="list-group">
+                {% for filename, result in results %}
+                    <li class="list-group-item">
+                        {{ filename }}: {{ result }} dBFS
+                    </li>
+                {% endfor %}
+                </ul>
                 {% endif %}
             </div>
         </div>
