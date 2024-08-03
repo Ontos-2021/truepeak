@@ -81,6 +81,9 @@ El proyecto **Audio Analysis Tool** es una aplicación web desarrollada con Flas
 2. **Ver los resultados**:
    - La aplicación procesará los archivos y mostrará los resultados de análisis para cada archivo, incluyendo True Peak, RMS, Loudness Integrado, y los valores máximos de Loudness Momentáneo y a Corto Plazo.
 
+## Pantallazo de la Aplicación
+![Pantallazo de la Aplicación](Truepeak.png)
+
 ## Contribuciones
 Las contribuciones son bienvenidas. Si deseas contribuir al proyecto, por favor sigue estos pasos:
 1. Haz un fork del repositorio.
@@ -95,3 +98,6 @@ Este proyecto está licenciado bajo la Licencia MIT. Consulta el archivo `LICENS
 ---
 
 Desarrollado por [José Mercado].
+
+## Contacto
+Sígueme en Instagram: [josemercado.music](https://www.instagram.com/josemercado.music)
