@@ -23,7 +23,14 @@
                 <ul class="list-group">
                 {% for filename, result in results %}
                     <li class="list-group-item">
-                        {{ filename }}: True Peak: {{ result[0] }} dBFS, RMS: {{ result[1] }} dB, Loudness (Integrated): {{ result[2] }} LUFS
+                        {{ filename }}:
+                        <ul>
+                            <li>True Peak: {{ result["true_peak_dbfs"] }} dBFS</li>
+                            <li>RMS: {{ result["rms_db"] }} dB</li>
+                            <li>Loudness (Integrated): {{ result["loudness_integrated"] }} LUFS</li>
+                            <li>Max Loudness (Momentary): {{ result["max_momentary_loudness"] }} LUFS</li>
+                            <li>Max Loudness (Short Term): {{ result["max_short_term_loudness"] }} LUFS</li>
+                        </ul>
                     </li>
                 {% endfor %}
                 </ul>
