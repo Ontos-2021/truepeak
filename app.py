@@ -4,8 +4,10 @@ import librosa
 import numpy as np
 import pyloudnorm as pyln
 import pandas as pd
+import matplotlib.pyplot as plt
 import os
 import io
+import base64
 
 app = Flask(__name__)
 
@@ -20,11 +22,14 @@ def index():
                 filename = secure_filename(file.filename)
                 filepath = os.path.join('tmp', filename)
                 file.save(filepath)
-                analysis_results = analyze_audio(filepath)
+                analysis_results, visualization = analyze_audio(filepath)
                 os.remove(filepath)  # Cleanup the stored file
-                results.append((filename, analysis_results))
+                results.append({
+                    "filename": filename,
+                    "analysis": analysis_results,
+                    "visualization": visualization
+                })
 
-        # Check if user wants to download the results
         if 'download' in request.form:
             return download_results(results)
 
@@ -62,32 +67,46 @@ def analyze_audio(file_path):
                            if len(audio_data[i:i + block_size_short_term]) == block_size_short_term]
     max_short_term_loudness = np.max(short_term_loudness) if short_term_loudness else float('nan')
 
+    # Generar la visualización de la forma de onda
+    fig, ax = plt.subplots()
+    librosa.display.waveshow(audio_data, sr=rate, ax=ax)
+    ax.set_title('Waveform')
+    ax.set_xlabel('Time (s)')
+    ax.set_ylabel('Amplitude')
+
+    # Guardar la figura en un buffer
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png')
+    buf.seek(0)
+    plt.close(fig)
+
+    # Codificar la imagen en base64
+    img_base64 = base64.b64encode(buf.read()).decode('utf-8')
+
     return {
-        "true_peak_dbfs": true_peak_dbfs,
-        "rms_db": rms_db,
-        "loudness_integrated": loudness_integrated,
-        "max_momentary_loudness": max_momentary_loudness,
-        "max_short_term_loudness": max_short_term_loudness
-    }
+               "true_peak_dbfs": true_peak_dbfs,
+               "rms_db": rms_db,
+               "loudness_integrated": loudness_integrated,
+               "max_momentary_loudness": max_momentary_loudness,
+               "max_short_term_loudness": max_short_term_loudness
+           }, img_base64
 
 
 def download_results(results):
-    # Convert results to DataFrame
     data = []
-    for filename, analysis in results:
+    for result in results:
         row = {
-            "Filename": filename,
-            "True Peak (dBFS)": analysis["true_peak_dbfs"],
-            "RMS (dB)": analysis["rms_db"],
-            "Loudness Integrated (LUFS)": analysis["loudness_integrated"],
-            "Max Loudness Momentary (LUFS)": analysis["max_momentary_loudness"],
-            "Max Loudness Short Term (LUFS)": analysis["max_short_term_loudness"]
+            "Filename": result["filename"],
+            "True Peak (dBFS)": result["analysis"]["true_peak_dbfs"],
+            "RMS (dB)": result["analysis"]["rms_db"],
+            "Loudness Integrated (LUFS)": result["analysis"]["loudness_integrated"],
+            "Max Loudness Momentary (LUFS)": result["analysis"]["max_momentary_loudness"],
+            "Max Loudness Short Term (LUFS)": result["analysis"]["max_short_term_loudness"]
         }
         data.append(row)
 
     df = pd.DataFrame(data)
 
-    # Save DataFrame to CSV in memory
     output = io.StringIO()
     df.to_csv(output, index=False)
     output.seek(0)
