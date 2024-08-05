@@ -8,6 +8,7 @@ import matplotlib
 
 matplotlib.use('Agg')  # Usar backend 'Agg' para evitar problemas con hilos
 import matplotlib.pyplot as plt
+import librosa.display
 import os
 import io
 import base64
@@ -25,12 +26,13 @@ def index():
                 filename = secure_filename(file.filename)
                 filepath = os.path.join('tmp', filename)
                 file.save(filepath)
-                analysis_results, visualization = analyze_audio(filepath)
+                analysis_results, waveform_img, spectrogram_img = analyze_audio(filepath)
                 os.remove(filepath)  # Cleanup the stored file
                 results.append({
                     "filename": filename,
                     "analysis": analysis_results,
-                    "visualization": visualization
+                    "waveform_img": waveform_img,
+                    "spectrogram_img": spectrogram_img
                 })
 
         if 'download' in request.form:
@@ -84,7 +86,24 @@ def analyze_audio(file_path):
     plt.close(fig)
 
     # Codificar la imagen en base64
-    img_base64 = base64.b64encode(buf.read()).decode('utf-8')
+    waveform_img = base64.b64encode(buf.read()).decode('utf-8')
+
+    # Generar la visualización del espectrograma
+    fig, ax = plt.subplots()
+    S = librosa.feature.melspectrogram(y=audio_data, sr=rate)
+    S_dB = librosa.power_to_db(S, ref=np.max)
+    img = librosa.display.specshow(S_dB, sr=rate, x_axis='time', y_axis='mel', ax=ax)
+    fig.colorbar(img, ax=ax, format='%+2.0f dB')
+    ax.set_title('Mel-frequency spectrogram')
+
+    # Guardar la figura en un buffer
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png')
+    buf.seek(0)
+    plt.close(fig)
+
+    # Codificar la imagen en base64
+    spectrogram_img = base64.b64encode(buf.read()).decode('utf-8')
 
     return {
                "true_peak_dbfs": true_peak_dbfs,
@@ -92,7 +111,7 @@ def analyze_audio(file_path):
                "loudness_integrated": loudness_integrated,
                "max_momentary_loudness": max_momentary_loudness,
                "max_short_term_loudness": max_short_term_loudness
-           }, img_base64
+           }, waveform_img, spectrogram_img
 
 
 def download_results(results):

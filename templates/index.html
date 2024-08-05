@@ -32,7 +32,8 @@
                             <li>Max Loudness (Momentary): {{ result.analysis.max_momentary_loudness }} LUFS</li>
                             <li>Max Loudness (Short Term): {{ result.analysis.max_short_term_loudness }} LUFS</li>
                         </ul>
-                        <img src="data:image/png;base64,{{ result.visualization }}" alt="Waveform">
+                        <img src="data:image/png;base64,{{ result.waveform_img }}" alt="Waveform">
+                        <img src="data:image/png;base64,{{ result.spectrogram_img }}" alt="Spectrogram">
                     </li>
                 {% endfor %}
                 </ul>
