@@ -17,7 +17,8 @@
                         <label for="file" class="form-label">Upload your audio files:</label>
                         <input type="file" class="form-control" id="file" name="file" multiple required>
                     </div>
-                    <button type="submit" class="btn btn-primary">Analyze</button>
+                    <button type="submit" class="btn btn-primary" name="analyze">Analyze</button>
+                    <button type="submit" class="btn btn-secondary" name="download">Analyze & Download CSV</button>
                 </form>
                 {% if results %}
                 <ul class="list-group">
