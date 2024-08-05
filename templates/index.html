@@ -37,6 +37,29 @@
                     </li>
                 {% endfor %}
                 </ul>
+                {% if comparison %}
+                <h2 class="mt-4">Comparison</h2>
+                <table class="table table-striped">
+                    <thead>
+                        <tr>
+                            <th>Metric</th>
+                            {% for result in results %}
+                            <th>{{ result.filename }}</th>
+                            {% endfor %}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for metric, values in comparison.items() %}
+                        <tr>
+                            <td>{{ metric.replace('_', ' ').capitalize() }}</td>
+                            {% for value in values %}
+                            <td>{{ value }}</td>
+                            {% endfor %}
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% endif %}
                 {% endif %}
             </div>
         </div>

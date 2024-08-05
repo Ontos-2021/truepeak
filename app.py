@@ -35,10 +35,15 @@ def index():
                     "spectrogram_img": spectrogram_img
                 })
 
+        if len(results) > 1:
+            comparison = compare_files(results)
+        else:
+            comparison = None
+
         if 'download' in request.form:
             return download_results(results)
 
-        return render_template('index.html', results=results)
+        return render_template('index.html', results=results, comparison=comparison)
     return render_template('index.html', results=None)
 
 
@@ -112,6 +117,15 @@ def analyze_audio(file_path):
                "max_momentary_loudness": max_momentary_loudness,
                "max_short_term_loudness": max_short_term_loudness
            }, waveform_img, spectrogram_img
+
+
+def compare_files(results):
+    metrics = ["true_peak_dbfs", "rms_db", "loudness_integrated", "max_momentary_loudness", "max_short_term_loudness"]
+    comparison = {}
+    for metric in metrics:
+        values = [result["analysis"][metric] for result in results]
+        comparison[metric] = values
+    return comparison
 
 
 def download_results(results):
