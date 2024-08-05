@@ -4,6 +4,9 @@ import librosa
 import numpy as np
 import pyloudnorm as pyln
 import pandas as pd
+import matplotlib
+
+matplotlib.use('Agg')  # Usar backend 'Agg' para evitar problemas con hilos
 import matplotlib.pyplot as plt
 import os
 import io
