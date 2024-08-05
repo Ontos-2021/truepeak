@@ -20,8 +20,17 @@
                     <button type="submit" class="btn btn-primary" name="analyze">Analyze</button>
                     <button type="submit" class="btn btn-secondary" name="download">Analyze & Download CSV</button>
                 </form>
+                {% if comparison_imgs %}
+                <h2 class="mt-4">Comparison of Metrics</h2>
+                {% for metric, img in comparison_imgs.items() %}
+                <div class="my-3">
+                    <h3>{{ metric.replace('_', ' ').capitalize() }}</h3>
+                    <img src="data:image/png;base64,{{ img }}" alt="{{ metric }}">
+                </div>
+                {% endfor %}
+                {% endif %}
                 {% if results %}
-                <ul class="list-group">
+                <ul class="list-group mt-4">
                 {% for result in results %}
                     <li class="list-group-item">
                         {{ result.filename }}:
@@ -37,29 +46,6 @@
                     </li>
                 {% endfor %}
                 </ul>
-                {% if comparison %}
-                <h2 class="mt-4">Comparison</h2>
-                <table class="table table-striped">
-                    <thead>
-                        <tr>
-                            <th>Metric</th>
-                            {% for result in results %}
-                            <th>{{ result.filename }}</th>
-                            {% endfor %}
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for metric, values in comparison.items() %}
-                        <tr>
-                            <td>{{ metric.replace('_', ' ').capitalize() }}</td>
-                            {% for value in values %}
-                            <td>{{ value }}</td>
-                            {% endfor %}
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-                {% endif %}
                 {% endif %}
             </div>
         </div>

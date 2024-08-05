@@ -35,15 +35,14 @@ def index():
                     "spectrogram_img": spectrogram_img
                 })
 
+        comparison_imgs = None
         if len(results) > 1:
-            comparison = compare_files(results)
-        else:
-            comparison = None
+            comparison_imgs = generate_comparison_graphs(results)
 
         if 'download' in request.form:
             return download_results(results)
 
-        return render_template('index.html', results=results, comparison=comparison)
+        return render_template('index.html', results=results, comparison_imgs=comparison_imgs)
     return render_template('index.html', results=None)
 
 
@@ -119,13 +118,29 @@ def analyze_audio(file_path):
            }, waveform_img, spectrogram_img
 
 
-def compare_files(results):
+def generate_comparison_graphs(results):
     metrics = ["true_peak_dbfs", "rms_db", "loudness_integrated", "max_momentary_loudness", "max_short_term_loudness"]
-    comparison = {}
+    comparison_imgs = {}
+    filenames = [result["filename"] for result in results]
+
     for metric in metrics:
         values = [result["analysis"][metric] for result in results]
-        comparison[metric] = values
-    return comparison
+        fig, ax = plt.subplots()
+        ax.bar(filenames, values)
+        ax.set_title(f'Comparison of {metric.replace("_", " ").capitalize()}')
+        ax.set_xlabel('Track')
+        ax.set_ylabel(metric.replace('_', ' ').capitalize())
+
+        # Guardar la figura en un buffer
+        buf = io.BytesIO()
+        plt.savefig(buf, format='png')
+        buf.seek(0)
+        plt.close(fig)
+
+        # Codificar la imagen en base64
+        comparison_imgs[metric] = base64.b64encode(buf.read()).decode('utf-8')
+
+    return comparison_imgs
 
 
 def download_results(results):
