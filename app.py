@@ -17,20 +17,23 @@ from reportlab.pdfgen import canvas
 
 app = Flask(__name__)
 
+# Asegúrate de que las imágenes se guarden en la carpeta static
+STATIC_FOLDER = 'static/generated_images'
+
 
 @app.route('/', methods=['GET', 'POST'])
 def index():
     if request.method == 'POST':
         files = request.files.getlist('file')
         results = []
+        pdf_path = None
         for file in files:
             if file and allowed_file(file.filename):
                 filename = secure_filename(file.filename)
-                filepath = os.path.join('tmp', filename)
+                filepath = os.path.join(STATIC_FOLDER, filename)
                 file.save(filepath)
                 analysis_results, waveform_img_web, spectrogram_img_web, waveform_img_pdf, spectrogram_img_pdf = analyze_audio(
                     filepath)
-                os.remove(filepath)  # Cleanup the stored file
                 results.append({
                     "filename": filename,
                     "analysis": analysis_results,
@@ -48,11 +51,19 @@ def index():
             return download_results(results)
         elif 'export_pdf' in request.form:
             pdf_buffer = export_pdf(results, comparison_imgs)
-            return send_file(pdf_buffer, as_attachment=True, download_name='audio_analysis.pdf',
-                             mimetype='application/pdf')
+            pdf_path = os.path.join(STATIC_FOLDER, 'audio_analysis.pdf')
+            with open(pdf_path, 'wb') as f:
+                f.write(pdf_buffer.getvalue())
+            return render_template('index.html', results=results, comparison_imgs=comparison_imgs, pdf_path=pdf_path)
 
         return render_template('index.html', results=results, comparison_imgs=comparison_imgs)
     return render_template('index.html', results=None)
+
+
+@app.route('/download_pdf')
+def download_pdf():
+    pdf_path = request.args.get('path')
+    return send_file(pdf_path, as_attachment=True, download_name='audio_analysis.pdf', mimetype='application/pdf')
 
 
 def allowed_file(filename):
@@ -85,45 +96,45 @@ def analyze_audio(file_path):
                            if len(audio_data[i:i + block_size_short_term]) == block_size_short_term]
     max_short_term_loudness = np.max(short_term_loudness) if short_term_loudness else float('nan')
 
-    # Generar la visualización de la forma de onda para la web
+    # Guardar la forma de onda para la web en la carpeta static
+    waveform_path_web = os.path.join(STATIC_FOLDER, f'{os.path.basename(file_path)}_waveform_web.png')
     fig, ax = plt.subplots()
     librosa.display.waveshow(audio_data, sr=rate, ax=ax)
     ax.set_title('Waveform')
     ax.set_xlabel('Time (s)')
     ax.set_ylabel('Amplitude')
-    waveform_path_web = os.path.join('tmp', f'{os.path.basename(file_path)}_waveform_web.png')
     plt.savefig(waveform_path_web)
     plt.close(fig)
 
-    # Generar la visualización de la forma de onda para el PDF
+    # Guardar la forma de onda para el PDF en la carpeta static
+    waveform_path_pdf = os.path.join(STATIC_FOLDER, f'{os.path.basename(file_path)}_waveform_pdf.png')
     fig, ax = plt.subplots()
     librosa.display.waveshow(audio_data, sr=rate, ax=ax)
     ax.set_title('Waveform')
     ax.set_xlabel('Time (s)')
     ax.set_ylabel('Amplitude')
-    waveform_path_pdf = os.path.join('tmp', f'{os.path.basename(file_path)}_waveform_pdf.png')
     plt.savefig(waveform_path_pdf)
     plt.close(fig)
 
-    # Generar la visualización del espectrograma para la web
+    # Guardar el espectrograma para la web en la carpeta static
+    spectrogram_path_web = os.path.join(STATIC_FOLDER, f'{os.path.basename(file_path)}_spectrogram_web.png')
     fig, ax = plt.subplots()
     S = librosa.feature.melspectrogram(y=audio_data, sr=rate)
     S_dB = librosa.power_to_db(S, ref=np.max)
     img = librosa.display.specshow(S_dB, sr=rate, x_axis='time', y_axis='mel', ax=ax)
     fig.colorbar(img, ax=ax, format='%+2.0f dB')
     ax.set_title('Mel-frequency spectrogram')
-    spectrogram_path_web = os.path.join('tmp', f'{os.path.basename(file_path)}_spectrogram_web.png')
     plt.savefig(spectrogram_path_web)
     plt.close(fig)
 
-    # Generar la visualización del espectrograma para el PDF
+    # Guardar el espectrograma para el PDF en la carpeta static
+    spectrogram_path_pdf = os.path.join(STATIC_FOLDER, f'{os.path.basename(file_path)}_spectrogram_pdf.png')
     fig, ax = plt.subplots()
     S = librosa.feature.melspectrogram(y=audio_data, sr=rate)
     S_dB = librosa.power_to_db(S, ref=np.max)
     img = librosa.display.specshow(S_dB, sr=rate, x_axis='time', y_axis='mel', ax=ax)
     fig.colorbar(img, ax=ax, format='%+2.0f dB')
     ax.set_title('Mel-frequency spectrogram')
-    spectrogram_path_pdf = os.path.join('tmp', f'{os.path.basename(file_path)}_spectrogram_pdf.png')
     plt.savefig(spectrogram_path_pdf)
     plt.close(fig)
 
@@ -149,8 +160,8 @@ def generate_comparison_graphs(results):
         ax.set_xlabel('Track')
         ax.set_ylabel(metric.replace('_', ' ').capitalize())
 
-        # Guardar la figura en un archivo temporal
-        comparison_path = os.path.join('tmp', f'comparison_{metric}.png')
+        # Guardar la figura en un archivo temporal dentro de static
+        comparison_path = os.path.join(STATIC_FOLDER, f'comparison_{metric}.png')
         plt.savefig(comparison_path)
         plt.close(fig)
 
@@ -230,6 +241,6 @@ def download_results(results):
 
 
 if __name__ == '__main__':
-    if not os.path.exists('tmp'):
-        os.makedirs('tmp')
+    if not os.path.exists(STATIC_FOLDER):
+        os.makedirs(STATIC_FOLDER)
     app.run(debug=True)

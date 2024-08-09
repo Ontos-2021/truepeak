@@ -21,6 +21,11 @@
                     <button type="submit" class="btn btn-secondary" name="download">Analyze & Download CSV</button>
                     <button type="submit" class="btn btn-info" name="export_pdf">Analyze & Export PDF</button>
                 </form>
+                {% if pdf_path %}
+                <div class="my-3">
+                    <a href="{{ url_for('download_pdf', path=pdf_path) }}" class="btn btn-success">Download PDF</a>
+                </div>
+                {% endif %}
                 {% if comparison_imgs %}
                 <h2 class="mt-4">Comparison of Metrics</h2>
                 {% for metric, img in comparison_imgs.items() %}
