@@ -1,4 +1,4 @@
-from flask import Flask, request, render_template, redirect, url_for, send_file
+from flask import Flask, request, render_template, send_file
 from werkzeug.utils import secure_filename
 import librosa
 import numpy as np
@@ -11,14 +11,13 @@ import matplotlib.pyplot as plt
 import librosa.display
 import os
 import io
-import base64
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 
 app = Flask(__name__)
 
-# Asegúrate de que las imágenes se guarden en la carpeta static
 STATIC_FOLDER = 'static/generated_images'
+TEMP_FOLDER = 'temp'
 
 
 @app.route('/', methods=['GET', 'POST'])
@@ -30,7 +29,7 @@ def index():
         for file in files:
             if file and allowed_file(file.filename):
                 filename = secure_filename(file.filename)
-                filepath = os.path.join(STATIC_FOLDER, filename)
+                filepath = os.path.join(TEMP_FOLDER, filename)
                 file.save(filepath)
                 analysis_results, waveform_img_web, spectrogram_img_web, waveform_img_pdf, spectrogram_img_pdf = analyze_audio(
                     filepath)
@@ -54,16 +53,12 @@ def index():
             pdf_path = os.path.join(STATIC_FOLDER, 'audio_analysis.pdf')
             with open(pdf_path, 'wb') as f:
                 f.write(pdf_buffer.getvalue())
-            return render_template('index.html', results=results, comparison_imgs=comparison_imgs, pdf_path=pdf_path)
+
+            # Descargar el PDF inmediatamente después de generarlo
+            return send_file(pdf_path, as_attachment=True, download_name='audio_analysis.pdf', mimetype='application/pdf')
 
         return render_template('index.html', results=results, comparison_imgs=comparison_imgs)
     return render_template('index.html', results=None)
-
-
-@app.route('/download_pdf')
-def download_pdf():
-    pdf_path = request.args.get('path')
-    return send_file(pdf_path, as_attachment=True, download_name='audio_analysis.pdf', mimetype='application/pdf')
 
 
 def allowed_file(filename):
@@ -240,7 +235,33 @@ def download_results(results):
                      download_name='analysis_results.csv')
 
 
+def cleanup_files(results, comparison_imgs, extra_files=[]):
+    for result in results:
+        try:
+            os.remove(result["waveform_img"])
+            os.remove(result["spectrogram_img"])
+            os.remove(result["waveform_img_pdf"])
+            os.remove(result["spectrogram_img_pdf"])
+        except Exception as e:
+            print(f"Error deleting file: {e}")
+
+    if comparison_imgs:
+        for img in comparison_imgs.values():
+            try:
+                os.remove(img)
+            except Exception as e:
+                print(f"Error deleting file: {e}")
+
+    for file in extra_files:
+        try:
+            os.remove(file)
+        except Exception as e:
+            print(f"Error deleting file: {e}")
+
+
 if __name__ == '__main__':
     if not os.path.exists(STATIC_FOLDER):
         os.makedirs(STATIC_FOLDER)
+    if not os.path.exists(TEMP_FOLDER):
+        os.makedirs(TEMP_FOLDER)
     app.run(debug=True)
