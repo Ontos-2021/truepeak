@@ -12,6 +12,8 @@ import librosa.display
 import os
 import io
 import base64
+from reportlab.lib.pagesizes import letter
+from reportlab.pdfgen import canvas
 
 app = Flask(__name__)
 
@@ -26,13 +28,16 @@ def index():
                 filename = secure_filename(file.filename)
                 filepath = os.path.join('tmp', filename)
                 file.save(filepath)
-                analysis_results, waveform_img, spectrogram_img = analyze_audio(filepath)
+                analysis_results, waveform_img_web, spectrogram_img_web, waveform_img_pdf, spectrogram_img_pdf = analyze_audio(
+                    filepath)
                 os.remove(filepath)  # Cleanup the stored file
                 results.append({
                     "filename": filename,
                     "analysis": analysis_results,
-                    "waveform_img": waveform_img,
-                    "spectrogram_img": spectrogram_img
+                    "waveform_img": waveform_img_web,
+                    "spectrogram_img": spectrogram_img_web,
+                    "waveform_img_pdf": waveform_img_pdf,
+                    "spectrogram_img_pdf": spectrogram_img_pdf,
                 })
 
         comparison_imgs = None
@@ -41,6 +46,10 @@ def index():
 
         if 'download' in request.form:
             return download_results(results)
+        elif 'export_pdf' in request.form:
+            pdf_buffer = export_pdf(results, comparison_imgs)
+            return send_file(pdf_buffer, as_attachment=True, download_name='audio_analysis.pdf',
+                             mimetype='application/pdf')
 
         return render_template('index.html', results=results, comparison_imgs=comparison_imgs)
     return render_template('index.html', results=None)
@@ -76,38 +85,47 @@ def analyze_audio(file_path):
                            if len(audio_data[i:i + block_size_short_term]) == block_size_short_term]
     max_short_term_loudness = np.max(short_term_loudness) if short_term_loudness else float('nan')
 
-    # Generar la visualización de la forma de onda
+    # Generar la visualización de la forma de onda para la web
     fig, ax = plt.subplots()
     librosa.display.waveshow(audio_data, sr=rate, ax=ax)
     ax.set_title('Waveform')
     ax.set_xlabel('Time (s)')
     ax.set_ylabel('Amplitude')
-
-    # Guardar la figura en un buffer
-    buf = io.BytesIO()
-    plt.savefig(buf, format='png')
-    buf.seek(0)
+    waveform_path_web = os.path.join('tmp', f'{os.path.basename(file_path)}_waveform_web.png')
+    plt.savefig(waveform_path_web)
     plt.close(fig)
 
-    # Codificar la imagen en base64
-    waveform_img = base64.b64encode(buf.read()).decode('utf-8')
+    # Generar la visualización de la forma de onda para el PDF
+    fig, ax = plt.subplots()
+    librosa.display.waveshow(audio_data, sr=rate, ax=ax)
+    ax.set_title('Waveform')
+    ax.set_xlabel('Time (s)')
+    ax.set_ylabel('Amplitude')
+    waveform_path_pdf = os.path.join('tmp', f'{os.path.basename(file_path)}_waveform_pdf.png')
+    plt.savefig(waveform_path_pdf)
+    plt.close(fig)
 
-    # Generar la visualización del espectrograma
+    # Generar la visualización del espectrograma para la web
     fig, ax = plt.subplots()
     S = librosa.feature.melspectrogram(y=audio_data, sr=rate)
     S_dB = librosa.power_to_db(S, ref=np.max)
     img = librosa.display.specshow(S_dB, sr=rate, x_axis='time', y_axis='mel', ax=ax)
     fig.colorbar(img, ax=ax, format='%+2.0f dB')
     ax.set_title('Mel-frequency spectrogram')
-
-    # Guardar la figura en un buffer
-    buf = io.BytesIO()
-    plt.savefig(buf, format='png')
-    buf.seek(0)
+    spectrogram_path_web = os.path.join('tmp', f'{os.path.basename(file_path)}_spectrogram_web.png')
+    plt.savefig(spectrogram_path_web)
     plt.close(fig)
 
-    # Codificar la imagen en base64
-    spectrogram_img = base64.b64encode(buf.read()).decode('utf-8')
+    # Generar la visualización del espectrograma para el PDF
+    fig, ax = plt.subplots()
+    S = librosa.feature.melspectrogram(y=audio_data, sr=rate)
+    S_dB = librosa.power_to_db(S, ref=np.max)
+    img = librosa.display.specshow(S_dB, sr=rate, x_axis='time', y_axis='mel', ax=ax)
+    fig.colorbar(img, ax=ax, format='%+2.0f dB')
+    ax.set_title('Mel-frequency spectrogram')
+    spectrogram_path_pdf = os.path.join('tmp', f'{os.path.basename(file_path)}_spectrogram_pdf.png')
+    plt.savefig(spectrogram_path_pdf)
+    plt.close(fig)
 
     return {
                "true_peak_dbfs": true_peak_dbfs,
@@ -115,7 +133,7 @@ def analyze_audio(file_path):
                "loudness_integrated": loudness_integrated,
                "max_momentary_loudness": max_momentary_loudness,
                "max_short_term_loudness": max_short_term_loudness
-           }, waveform_img, spectrogram_img
+           }, waveform_path_web, spectrogram_path_web, waveform_path_pdf, spectrogram_path_pdf
 
 
 def generate_comparison_graphs(results):
@@ -131,16 +149,61 @@ def generate_comparison_graphs(results):
         ax.set_xlabel('Track')
         ax.set_ylabel(metric.replace('_', ' ').capitalize())
 
-        # Guardar la figura en un buffer
-        buf = io.BytesIO()
-        plt.savefig(buf, format='png')
-        buf.seek(0)
+        # Guardar la figura en un archivo temporal
+        comparison_path = os.path.join('tmp', f'comparison_{metric}.png')
+        plt.savefig(comparison_path)
         plt.close(fig)
 
-        # Codificar la imagen en base64
-        comparison_imgs[metric] = base64.b64encode(buf.read()).decode('utf-8')
+        # Guardar el path de la imagen
+        comparison_imgs[metric] = comparison_path
 
     return comparison_imgs
+
+
+def export_pdf(results, comparison_imgs):
+    buffer = io.BytesIO()
+    p = canvas.Canvas(buffer, pagesize=letter)
+    width, height = letter
+
+    p.setFont("Helvetica", 12)
+
+    # Añadir análisis de pista por página
+    for result in results:
+        y = height - 40
+        p.drawString(30, y, f'File: {result["filename"]}')
+        y -= 20
+        for metric, value in result["analysis"].items():
+            p.drawString(30, y, f'{metric.replace("_", " ").capitalize()}: {value}')
+            y -= 20
+
+        # Añadir imágenes de forma de onda y espectrograma (versión PDF)
+        waveform_path_pdf = result["waveform_img_pdf"]
+        spectrogram_path_pdf = result["spectrogram_img_pdf"]
+        p.drawImage(waveform_path_pdf, 30, y - 150, width=width - 60, height=100)
+        y -= 170
+        p.drawImage(spectrogram_path_pdf, 30, y - 150, width=width - 60, height=100)
+        y -= 170
+
+        p.showPage()  # Nueva página para cada pista
+
+    # Añadir comparaciones, dos imágenes por página
+    if comparison_imgs:
+        y = height - 40
+        count = 0
+        for metric, img_path in comparison_imgs.items():
+            p.drawString(30, y, f'Comparison of {metric.replace("_", " ").capitalize()}')
+            y -= 20
+            p.drawImage(img_path, 30, y - 200, width=width - 60, height=200)
+            y -= 220
+            count += 1
+            if count % 2 == 0:
+                p.showPage()
+                y = height - 40
+
+    p.save()
+    buffer.seek(0)
+
+    return buffer
 
 
 def download_results(results):
@@ -167,4 +230,6 @@ def download_results(results):
 
 
 if __name__ == '__main__':
+    if not os.path.exists('tmp'):
+        os.makedirs('tmp')
     app.run(debug=True)
