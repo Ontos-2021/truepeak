@@ -1,4 +1,5 @@
-from flask import Flask, request, render_template, send_file
+import os
+from flask import Flask, request, render_template, jsonify
 from werkzeug.utils import secure_filename
 import librosa
 import numpy as np
@@ -6,63 +7,164 @@ import pyloudnorm as pyln
 import pandas as pd
 import matplotlib
 
-matplotlib.use('Agg')  # Usar backend 'Agg' para evitar problemas con hilos
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import librosa.display
-import os
 import io
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
+from celery import Celery
+import base64
+from functools import wraps
+import time
+from collections import defaultdict
 
+# Configuración de la aplicación Flask y Celery
 app = Flask(__name__)
+app.config['UPLOAD_FOLDER'] = 'temp'
+app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100 MB limit
+app.config['CELERY_BROKER_URL'] = 'redis://localhost:6379/0'
+app.config['CELERY_RESULT_BACKEND'] = 'redis://localhost:6379/0'
 
-STATIC_FOLDER = 'static/generated_images'
-TEMP_FOLDER = 'temp'
+
+def make_celery(app):
+    celery = Celery(
+        app.import_name,
+        broker=app.config['CELERY_BROKER_URL'],
+        backend=app.config['CELERY_RESULT_BACKEND']
+    )
+    celery.conf.update(app.config)
+    return celery
 
 
-@app.route('/', methods=['GET', 'POST'])
-def index():
-    if request.method == 'POST':
-        files = request.files.getlist('file')
-        results = []
-        pdf_path = None
-        for file in files:
-            if file and allowed_file(file.filename):
-                filename = secure_filename(file.filename)
-                filepath = os.path.join(TEMP_FOLDER, filename)
-                file.save(filepath)
-                analysis_results, waveform_img_web, spectrogram_img_web, waveform_img_pdf, spectrogram_img_pdf = analyze_audio(
-                    filepath)
-                results.append({
-                    "filename": filename,
-                    "analysis": analysis_results,
-                    "waveform_img": waveform_img_web,
-                    "spectrogram_img": spectrogram_img_web,
-                    "waveform_img_pdf": waveform_img_pdf,
-                    "spectrogram_img_pdf": spectrogram_img_pdf,
-                })
+celery = make_celery(app)
 
-        comparison_imgs = None
-        if len(results) > 1:
-            comparison_imgs = generate_comparison_graphs(results)
+ALLOWED_EXTENSIONS = {'wav', 'mp3'}
 
-        if 'download' in request.form:
-            return download_results(results)
-        elif 'export_pdf' in request.form:
-            pdf_buffer = export_pdf(results, comparison_imgs)
-            pdf_path = os.path.join(STATIC_FOLDER, 'audio_analysis.pdf')
-            with open(pdf_path, 'wb') as f:
-                f.write(pdf_buffer.getvalue())
 
-            # Descargar el PDF inmediatamente después de generarlo
-            return send_file(pdf_path, as_attachment=True, download_name='audio_analysis.pdf', mimetype='application/pdf')
+# Implementación simple de Rate Limiting
+class RateLimiter:
+    def __init__(self, max_calls, per_seconds):
+        self.max_calls = max_calls
+        self.per_seconds = per_seconds
+        self.calls = defaultdict(list)
 
-        return render_template('index.html', results=results, comparison_imgs=comparison_imgs)
-    return render_template('index.html', results=None)
+    def __call__(self, func):
+        @wraps(func)
+        def wrapped(*args, **kwargs):
+            now = time.time()
+            self.calls[request.remote_addr] = [call for call in self.calls[request.remote_addr] if
+                                               call > now - self.per_seconds]
+            if len(self.calls[request.remote_addr]) >= self.max_calls:
+                return jsonify({"error": "Too many requests"}), 429
+            self.calls[request.remote_addr].append(now)
+            return func(*args, **kwargs)
+
+        return wrapped
+
+
+rate_limiter = RateLimiter(max_calls=10, per_seconds=60)  # 10 calls per minute
 
 
 def allowed_file(filename):
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in {'wav', 'mp3'}
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+@app.route('/', methods=['GET', 'POST'])
+@rate_limiter
+def index():
+    if request.method == 'POST':
+        if 'file' not in request.files:
+            return jsonify({"error": "No file part"}), 400
+        files = request.files.getlist('file')
+        if not files or files[0].filename == '':
+            return jsonify({"error": "No selected file"}), 400
+
+        filenames = []
+        for file in files:
+            if file and allowed_file(file.filename):
+                filename = secure_filename(file.filename)
+                filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                file.save(filepath)
+                filenames.append(filepath)
+            else:
+                return jsonify({"error": "Invalid file type"}), 400
+
+        task = process_audio_files.delay(filenames)
+        return jsonify({"task_id": task.id}), 202
+
+    return render_template('index.html')
+
+
+# Add a try/except block for audio analysis
+@celery.task(bind=True)
+def process_audio_files(self, filenames):
+    results = []
+    total_files = len(filenames)
+    
+    try:
+        for index, filepath in enumerate(filenames, start=1):
+            self.update_state(state='PROGRESS',
+                              meta={'current': index, 'total': total_files})
+            try:
+                analysis_results, waveform_img, spectrogram_img = analyze_audio(filepath)
+                results.append({
+                    "filename": os.path.basename(filepath),
+                    "analysis": analysis_results,
+                    "waveform_img": waveform_img,
+                    "spectrogram_img": spectrogram_img
+                })
+            except Exception as e:
+                app.logger.error(f"Error processing file {filepath}: {e}")
+                results.append({
+                    "filename": os.path.basename(filepath),
+                    "error": str(e)
+                })
+
+        # Only generate comparisons for files that were successfully analyzed
+        valid_results = [r for r in results if "error" not in r]
+        comparison_imgs = generate_comparison_graphs(valid_results) if len(valid_results) > 1 else None
+        pdf_buffer = export_pdf(results, comparison_imgs)
+        csv_buffer = export_csv(results)
+
+        return {
+            "results": results,
+            "comparison_imgs": comparison_imgs,
+            "pdf": base64.b64encode(pdf_buffer.getvalue()).decode('utf-8'),
+            "csv": base64.b64encode(csv_buffer.getvalue()).decode('utf-8')
+        }
+    finally:
+        # Always clean up files regardless of success or failure
+        cleanup_files(filenames)
+
+
+@app.route('/status/<task_id>')
+def task_status(task_id):
+    task = process_audio_files.AsyncResult(task_id)
+    if task.state == 'PENDING':
+        response = {
+            'state': task.state,
+            'current': 0,
+            'total': 1,
+            'status': 'Pending...'
+        }
+    elif task.state != 'FAILURE':
+        response = {
+            'state': task.state,
+            'current': task.info.get('current', 0),
+            'total': task.info.get('total', 1),
+            'status': task.info.get('status', '')
+        }
+        if task.state == 'SUCCESS':
+            response['result'] = task.result
+    else:
+        response = {
+            'state': task.state,
+            'current': 1,
+            'total': 1,
+            'status': str(task.info)
+        }
+    return jsonify(response)
 
 
 def analyze_audio(file_path):
@@ -91,47 +193,30 @@ def analyze_audio(file_path):
                            if len(audio_data[i:i + block_size_short_term]) == block_size_short_term]
     max_short_term_loudness = np.max(short_term_loudness) if short_term_loudness else float('nan')
 
-    # Guardar la forma de onda para la web en la carpeta static
-    waveform_path_web = os.path.join(STATIC_FOLDER, f'{os.path.basename(file_path)}_waveform_web.png')
-    fig, ax = plt.subplots()
-    librosa.display.waveshow(audio_data, sr=rate, ax=ax)
-    ax.set_title('Waveform')
-    ax.set_xlabel('Time (s)')
-    ax.set_ylabel('Amplitude')
-    plt.savefig(waveform_path_web)
-    plt.close(fig)
+    # Generar forma de onda
+    plt.figure(figsize=(10, 4))
+    librosa.display.waveshow(audio_data, sr=rate)
+    plt.title('Waveform')
+    plt.xlabel('Time')
+    plt.ylabel('Amplitude')
+    waveform_buffer = io.BytesIO()
+    plt.savefig(waveform_buffer, format='png')
+    plt.close()
+    waveform_buffer.seek(0)
+    waveform_img = base64.b64encode(waveform_buffer.getvalue()).decode('utf-8')
 
-    # Guardar la forma de onda para el PDF en la carpeta static
-    waveform_path_pdf = os.path.join(STATIC_FOLDER, f'{os.path.basename(file_path)}_waveform_pdf.png')
-    fig, ax = plt.subplots()
-    librosa.display.waveshow(audio_data, sr=rate, ax=ax)
-    ax.set_title('Waveform')
-    ax.set_xlabel('Time (s)')
-    ax.set_ylabel('Amplitude')
-    plt.savefig(waveform_path_pdf)
-    plt.close(fig)
-
-    # Guardar el espectrograma para la web en la carpeta static
-    spectrogram_path_web = os.path.join(STATIC_FOLDER, f'{os.path.basename(file_path)}_spectrogram_web.png')
-    fig, ax = plt.subplots()
+    # Generar espectrograma
+    plt.figure(figsize=(10, 4))
     S = librosa.feature.melspectrogram(y=audio_data, sr=rate)
     S_dB = librosa.power_to_db(S, ref=np.max)
-    img = librosa.display.specshow(S_dB, sr=rate, x_axis='time', y_axis='mel', ax=ax)
-    fig.colorbar(img, ax=ax, format='%+2.0f dB')
-    ax.set_title('Mel-frequency spectrogram')
-    plt.savefig(spectrogram_path_web)
-    plt.close(fig)
-
-    # Guardar el espectrograma para el PDF en la carpeta static
-    spectrogram_path_pdf = os.path.join(STATIC_FOLDER, f'{os.path.basename(file_path)}_spectrogram_pdf.png')
-    fig, ax = plt.subplots()
-    S = librosa.feature.melspectrogram(y=audio_data, sr=rate)
-    S_dB = librosa.power_to_db(S, ref=np.max)
-    img = librosa.display.specshow(S_dB, sr=rate, x_axis='time', y_axis='mel', ax=ax)
-    fig.colorbar(img, ax=ax, format='%+2.0f dB')
-    ax.set_title('Mel-frequency spectrogram')
-    plt.savefig(spectrogram_path_pdf)
-    plt.close(fig)
+    librosa.display.specshow(S_dB, sr=rate, x_axis='time', y_axis='mel')
+    plt.colorbar(format='%+2.0f dB')
+    plt.title('Mel-frequency spectrogram')
+    spectrogram_buffer = io.BytesIO()
+    plt.savefig(spectrogram_buffer, format='png')
+    plt.close()
+    spectrogram_buffer.seek(0)
+    spectrogram_img = base64.b64encode(spectrogram_buffer.getvalue()).decode('utf-8')
 
     return {
                "true_peak_dbfs": true_peak_dbfs,
@@ -139,29 +224,28 @@ def analyze_audio(file_path):
                "loudness_integrated": loudness_integrated,
                "max_momentary_loudness": max_momentary_loudness,
                "max_short_term_loudness": max_short_term_loudness
-           }, waveform_path_web, spectrogram_path_web, waveform_path_pdf, spectrogram_path_pdf
+           }, waveform_img, spectrogram_img
 
 
 def generate_comparison_graphs(results):
     metrics = ["true_peak_dbfs", "rms_db", "loudness_integrated", "max_momentary_loudness", "max_short_term_loudness"]
     comparison_imgs = {}
-    filenames = [result["filename"] for result in results]
 
     for metric in metrics:
+        plt.figure(figsize=(10, 6))
         values = [result["analysis"][metric] for result in results]
-        fig, ax = plt.subplots()
-        ax.bar(filenames, values)
-        ax.set_title(f'Comparison of {metric.replace("_", " ").capitalize()}')
-        ax.set_xlabel('Track')
-        ax.set_ylabel(metric.replace('_', ' ').capitalize())
+        plt.bar(range(len(values)), values)
+        plt.title(f'Comparison of {metric.replace("_", " ").capitalize()}')
+        plt.xlabel('Tracks')
+        plt.ylabel(metric.replace('_', ' ').capitalize())
+        plt.xticks(range(len(values)), [result["filename"] for result in results], rotation=45, ha='right')
+        plt.tight_layout()
 
-        # Guardar la figura en un archivo temporal dentro de static
-        comparison_path = os.path.join(STATIC_FOLDER, f'comparison_{metric}.png')
-        plt.savefig(comparison_path)
-        plt.close(fig)
-
-        # Guardar el path de la imagen
-        comparison_imgs[metric] = comparison_path
+        img_buffer = io.BytesIO()
+        plt.savefig(img_buffer, format='png')
+        plt.close()
+        img_buffer.seek(0)
+        comparison_imgs[metric] = base64.b64encode(img_buffer.getvalue()).decode('utf-8')
 
     return comparison_imgs
 
@@ -172,47 +256,45 @@ def export_pdf(results, comparison_imgs):
     width, height = letter
 
     p.setFont("Helvetica", 12)
+    y = height - 40
 
-    # Añadir análisis de pista por página
     for result in results:
-        y = height - 40
         p.drawString(30, y, f'File: {result["filename"]}')
         y -= 20
         for metric, value in result["analysis"].items():
-            p.drawString(30, y, f'{metric.replace("_", " ").capitalize()}: {value}')
+            p.drawString(30, y, f'{metric.replace("_", " ").capitalize()}: {value:.2f}')
             y -= 20
 
-        # Añadir imágenes de forma de onda y espectrograma (versión PDF)
-        waveform_path_pdf = result["waveform_img_pdf"]
-        spectrogram_path_pdf = result["spectrogram_img_pdf"]
-        p.drawImage(waveform_path_pdf, 30, y - 150, width=width - 60, height=100)
-        y -= 170
-        p.drawImage(spectrogram_path_pdf, 30, y - 150, width=width - 60, height=100)
-        y -= 170
+        p.drawImage(io.BytesIO(base64.b64decode(result["waveform_img"])), 30, y - 200, width=500, height=200)
+        y -= 220
+        p.drawImage(io.BytesIO(base64.b64decode(result["spectrogram_img"])), 30, y - 200, width=500, height=200)
+        y -= 220
 
-        p.showPage()  # Nueva página para cada pista
+        if y < 100:
+            p.showPage()
+            y = height - 40
 
-    # Añadir comparaciones, dos imágenes por página
     if comparison_imgs:
+        p.showPage()
         y = height - 40
-        count = 0
-        for metric, img_path in comparison_imgs.items():
-            p.drawString(30, y, f'Comparison of {metric.replace("_", " ").capitalize()}')
+        p.drawString(30, y, 'Comparison Graphs')
+        y -= 40
+        for metric, img_data in comparison_imgs.items():
+            p.drawString(30, y, f'{metric.replace("_", " ").capitalize()}')
             y -= 20
-            p.drawImage(img_path, 30, y - 200, width=width - 60, height=200)
-            y -= 220
-            count += 1
-            if count % 2 == 0:
+            p.drawImage(io.BytesIO(base64.b64decode(img_data)), 30, y - 300, width=500, height=300)
+            y -= 320
+            if y < 100:
                 p.showPage()
                 y = height - 40
 
     p.save()
     buffer.seek(0)
-
     return buffer
 
 
-def download_results(results):
+def export_csv(results):
+    buffer = io.StringIO()
     data = []
     for result in results:
         row = {
@@ -226,42 +308,20 @@ def download_results(results):
         data.append(row)
 
     df = pd.DataFrame(data)
-
-    output = io.StringIO()
-    df.to_csv(output, index=False)
-    output.seek(0)
-
-    return send_file(io.BytesIO(output.getvalue().encode()), mimetype='text/csv', as_attachment=True,
-                     download_name='analysis_results.csv')
+    df.to_csv(buffer, index=False)
+    buffer.seek(0)
+    return buffer
 
 
-def cleanup_files(results, comparison_imgs, extra_files=[]):
-    for result in results:
+def cleanup_files(filenames):
+    for filename in filenames:
         try:
-            os.remove(result["waveform_img"])
-            os.remove(result["spectrogram_img"])
-            os.remove(result["waveform_img_pdf"])
-            os.remove(result["spectrogram_img_pdf"])
+            os.remove(filename)
         except Exception as e:
-            print(f"Error deleting file: {e}")
-
-    if comparison_imgs:
-        for img in comparison_imgs.values():
-            try:
-                os.remove(img)
-            except Exception as e:
-                print(f"Error deleting file: {e}")
-
-    for file in extra_files:
-        try:
-            os.remove(file)
-        except Exception as e:
-            print(f"Error deleting file: {e}")
+            app.logger.error(f"Error deleting file {filename}: {e}")
 
 
 if __name__ == '__main__':
-    if not os.path.exists(STATIC_FOLDER):
-        os.makedirs(STATIC_FOLDER)
-    if not os.path.exists(TEMP_FOLDER):
-        os.makedirs(TEMP_FOLDER)
+    if not os.path.exists(app.config['UPLOAD_FOLDER']):
+        os.makedirs(app.config['UPLOAD_FOLDER'])
     app.run(debug=True)

@@ -2,3 +2,6 @@
 .mp3
 .idea
 env
+__pycache__
+/temp
+/static
