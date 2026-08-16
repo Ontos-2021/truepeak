@@ -1,7 +1,9 @@
-.wav
-.mp3
+*.wav
+*.mp3
 .idea
 env
 __pycache__
 /temp
+/tmp
 /static
+.pytest_cache
