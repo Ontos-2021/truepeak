@@ -29,7 +29,7 @@
                     </div>
                     <button type="submit" class="btn btn-primary" id="analyzeBtn">Analyze</button>
                 </form>
-                
+
                 <div id="errorMessage" class="hidden"></div>
 
                 <div id="progressBar" class="progress mb-3 hidden">
@@ -51,101 +51,76 @@
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
+        let lastResults = null;
+
         document.getElementById('uploadForm').addEventListener('submit', function(e) {
             e.preventDefault();
             const formData = new FormData(this);
             const errorDiv = document.getElementById('errorMessage');
             errorDiv.classList.add('hidden');
             errorDiv.textContent = '';
-            
-            // Show progress bar with indeterminate state
+
+            const progressContainer = document.getElementById('progressBar');
             const progressBar = document.querySelector('.progress-bar');
-            document.getElementById('progressBar').classList.remove('hidden');
+            progressContainer.classList.remove('hidden');
+            progressBar.classList.remove('bg-danger');
             progressBar.style.width = '100%';
             progressBar.textContent = 'Processing...';
-            
-            // Disable button and show loading state
+
             const analyzeBtn = document.getElementById('analyzeBtn');
             analyzeBtn.disabled = true;
             analyzeBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Processing...';
-            
-            console.log("Submitting form...");
-            
-            fetch('/', {
+
+            fetch('/analyze', {
                 method: 'POST',
                 body: formData
             })
-            .then(response => {
-                console.log("Response status:", response.status);
-                
-                if (response.status === 413) {
-                    throw new Error("File too large. Please upload smaller files.");
-                }
-                
-                // Handle non-JSON responses
-                const contentType = response.headers.get("content-type");
-                if (!contentType || !contentType.includes("application/json")) {
-                    throw new Error(`Server returned an invalid response (${response.status}). Please try again later.`);
-                }
-                
-                if (!response.ok) {
-                    return response.json().then(data => {
-                        throw new Error(data.error || `HTTP error! status: ${response.status}`);
-                    }).catch(err => {
-                        // If JSON parsing fails
-                        throw new Error(`Server error (${response.status}). Please contact support.`);
-                    });
-                }
-                return response.json();
-            })
+            .then(handleResponse)
             .then(data => {
-                console.log("Response data:", data);
+                lastResults = data;
                 displayResults(data);
+                downloadPdf();
             })
             .catch(error => {
                 console.error('Error:', error);
                 showError(error.message);
             })
             .finally(() => {
-                // Re-enable button and restore original text
                 analyzeBtn.disabled = false;
                 analyzeBtn.textContent = 'Analyze';
+                progressContainer.classList.add('hidden');
             });
         });
-        
+
+        function handleResponse(response) {
+            const contentType = response.headers.get("content-type") || "";
+            if (!contentType.includes("application/json")) {
+                throw new Error(`Server returned an invalid response (${response.status}). Please try again later.`);
+            }
+            return response.json().then(data => {
+                if (!response.ok) {
+                    throw new Error(data.error || `HTTP error! status: ${response.status}`);
+                }
+                return data;
+            });
+        }
+
         function showError(message) {
             const errorDiv = document.getElementById('errorMessage');
             errorDiv.textContent = message;
             errorDiv.classList.remove('hidden');
-            // Hide progress bar
             document.getElementById('progressBar').classList.add('hidden');
         }
 
-        // Remove the checkTaskStatus function as we no longer use Celery
+        function fmt(value) {
+            if (value === null || value === undefined) return 'N/A';
+            return value.toFixed(2);
+        }
 
-        function updateProgressBar(state, current, total) {
-            const progressBar = document.querySelector('.progress-bar');
-            let percentage = (current / total) * 100;
-
-            switch(state) {
-                case 'PENDING':
-                    progressBar.style.width = '25%';
-                    progressBar.textContent = 'Pending...';
-                    break;
-                case 'PROGRESS':
-                    progressBar.style.width = `${percentage}%`;
-                    progressBar.textContent = `Processing... (${current}/${total})`;
-                    break;
-                case 'SUCCESS':
-                    progressBar.style.width = '100%';
-                    progressBar.textContent = 'Complete!';
-                    break;
-                case 'FAILURE':
-                    progressBar.style.width = '100%';
-                    progressBar.classList.add('bg-danger');
-                    progressBar.textContent = 'Error occurred';
-                    break;
-            }
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = String(text);
+            return div.innerHTML;
         }
 
         function displayResults(results) {
@@ -156,14 +131,25 @@
             results.results.forEach(result => {
                 const li = document.createElement('li');
                 li.className = 'list-group-item';
+
+                if (result.error) {
+                    li.innerHTML = `
+                        <h3>${escapeHtml(result.filename)}</h3>
+                        <div class="text-danger">Error: ${escapeHtml(result.error)}</div>
+                    `;
+                    fileResults.appendChild(li);
+                    return;
+                }
+
+                const a = result.analysis || {};
                 li.innerHTML = `
-                    <h3>${result.filename}</h3>
+                    <h3>${escapeHtml(result.filename)}</h3>
                     <ul>
-                        <li>True Peak: ${result.analysis.true_peak_dbfs.toFixed(2)} dBFS</li>
-                        <li>RMS: ${result.analysis.rms_db.toFixed(2)} dB</li>
-                        <li>Loudness (Integrated): ${result.analysis.loudness_integrated.toFixed(2)} LUFS</li>
-                        <li>Max Loudness (Momentary): ${result.analysis.max_momentary_loudness.toFixed(2)} LUFS</li>
-                        <li>Max Loudness (Short Term): ${result.analysis.max_short_term_loudness.toFixed(2)} LUFS</li>
+                        <li>True Peak: ${fmt(a.true_peak_dbfs)} dBFS</li>
+                        <li>RMS: ${fmt(a.rms_db)} dB</li>
+                        <li>Loudness (Integrated): ${fmt(a.loudness_integrated)} LUFS</li>
+                        <li>Max Loudness (Momentary): ${fmt(a.max_momentary_loudness)} LUFS</li>
+                        <li>Max Loudness (Short Term): ${fmt(a.max_short_term_loudness)} LUFS</li>
                     </ul>
                     <img src="data:image/png;base64,${result.waveform_img}" alt="Waveform" class="img-fluid">
                     <img src="data:image/png;base64,${result.spectrogram_img}" alt="Spectrogram" class="img-fluid">
@@ -171,9 +157,9 @@
                 fileResults.appendChild(li);
             });
 
+            const comparisonCharts = document.getElementById('comparisonCharts');
+            comparisonCharts.innerHTML = '';
             if (results.comparison_imgs) {
-                const comparisonCharts = document.getElementById('comparisonCharts');
-                comparisonCharts.innerHTML = '';
                 Object.entries(results.comparison_imgs).forEach(([metric, imgData]) => {
                     const div = document.createElement('div');
                     div.className = 'mb-3';
@@ -184,40 +170,66 @@
                     comparisonCharts.appendChild(div);
                 });
             }
+        }
 
-            document.getElementById('downloadPdf').addEventListener('click', () => {
-                const pdfBlob = base64ToBlob(results.pdf, 'application/pdf');
-                downloadBlob(pdfBlob, 'audio_analysis.pdf');
-            });
+        // Bind download buttons once (not per analysis)
+        document.getElementById('downloadPdf').addEventListener('click', () => downloadPdf());
+        document.getElementById('downloadCsv').addEventListener('click', () => downloadCsv());
 
-            document.getElementById('downloadCsv').addEventListener('click', () => {
-                const csvBlob = base64ToBlob(results.csv, 'text/csv');
-                downloadBlob(csvBlob, 'audio_analysis.csv');
+        function downloadPdf() {
+            if (!lastResults) return;
+            fetch('/export/pdf', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    results: lastResults.results,
+                    comparison_imgs: lastResults.comparison_imgs || null
+                })
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(data => {
+                        throw new Error(data.error || 'PDF generation failed');
+                    });
+                }
+                return response.blob();
+            })
+            .then(blob => downloadBlob(blob, 'audio_analysis.pdf'))
+            .catch(error => {
+                console.error('Error:', error);
+                showError(error.message);
             });
         }
 
-        function base64ToBlob(base64, mimeType) {
-            const byteChars = atob(base64);
-            const byteArrays = [];
-
-            for (let offset = 0; offset < byteChars.length; offset += 512) {
-                const slice = byteChars.slice(offset, offset + 512);
-                const byteNumbers = new Array(slice.length);
-                for (let i = 0; i < slice.length; i++) {
-                    byteNumbers[i] = slice.charCodeAt(i);
+        function downloadCsv() {
+            if (!lastResults) return;
+            fetch('/export/csv', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ results: lastResults.results })
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(data => {
+                        throw new Error(data.error || 'CSV generation failed');
+                    });
                 }
-                const byteArray = new Uint8Array(byteNumbers);
-                byteArrays.push(byteArray);
-            }
-
-            return new Blob(byteArrays, { type: mimeType });
+                return response.blob();
+            })
+            .then(blob => downloadBlob(blob, 'audio_analysis.csv'))
+            .catch(error => {
+                console.error('Error:', error);
+                showError(error.message);
+            });
         }
 
         function downloadBlob(blob, filename) {
+            const url = window.URL.createObjectURL(blob);
             const link = document.createElement('a');
-            link.href = window.URL.createObjectURL(blob);
+            link.href = url;
             link.download = filename;
             link.click();
+            window.setTimeout(() => window.URL.revokeObjectURL(url), 1000);
         }
     </script>
 </body>

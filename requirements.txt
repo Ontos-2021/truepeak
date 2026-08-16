@@ -37,6 +37,7 @@ pyloudnorm==0.1.1
 pyparsing==3.1.2
 python-dateutil==2.9.0.post0
 pytz==2024.1
+reportlab==4.2.2
 requests==2.32.3
 scikit-learn==1.5.1
 scipy==1.13.1
