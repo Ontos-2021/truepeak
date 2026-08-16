@@ -9,6 +9,9 @@ El proyecto **Audio Analysis Tool** es una aplicación web desarrollada con Flas
 - Medición de Loudness Integrado en LUFS.
 - Determinación de los valores máximos de Loudness Momentáneo y a Corto Plazo en LUFS.
 - Soporte para múltiples archivos de audio simultáneamente.
+- Visualización de forma de onda y espectrograma por archivo.
+- Gráficos de comparación de métricas entre tracks.
+- Exportación de reporte en PDF (descarga automática al finalizar el análisis) y de datos en CSV.
 
 ## Requisitos del Sistema
 - Python 3.7 o superior
@@ -79,7 +82,32 @@ El proyecto **Audio Analysis Tool** es una aplicación web desarrollada con Flas
    - Utiliza el formulario en la página principal para cargar uno o varios archivos de audio en formato WAV o MP3.
 
 2. **Ver los resultados**:
-   - La aplicación procesará los archivos y mostrará los resultados de análisis para cada archivo, incluyendo True Peak, RMS, Loudness Integrado, y los valores máximos de Loudness Momentáneo y a Corto Plazo.
+   - La aplicación procesará los archivos y mostrará los resultados de análisis para cada archivo, incluyendo True Peak, RMS, Loudness Integrado, y los valores máximos de Loudness Momentáneo y a Corto Plazo, junto con la forma de onda, el espectrograma y los gráficos de comparación.
+
+3. **Descargar los resultados**:
+   - El reporte PDF se descarga automáticamente al terminar el análisis. Los botones *Download PDF Report* y *Download CSV Data* permiten volver a descargarlos en cualquier momento.
+
+4. **Casos especiales**:
+   - Archivos demasiado cortos para medir loudness muestran `N/A` en esas métricas pero se analizan igual.
+   - Archivos corruptos o ilegibles no detienen el análisis del resto: se listan con su error y se omiten del CSV y del reporte PDF.
+
+## Endpoints de la API
+| Método | Ruta | Descripción |
+| --- | --- | --- |
+| `GET` | `/` | Página principal. |
+| `POST` | `/analyze` | Sube uno o varios archivos (multipart, campo `file`) y devuelve métricas e imágenes en JSON. |
+| `POST` | `/export/pdf` | Recibe el JSON de `/analyze` (campos `results` y `comparison_imgs`) y devuelve el reporte PDF. |
+| `POST` | `/export/csv` | Recibe el JSON de `/analyze` (campo `results`) y devuelve los datos en CSV. |
+
+El límite de subida es de 200 MB por request y cada IP está limitada a 10 análisis por minuto.
+
+## Ejecutar los Tests
+Se incluye una suite de pruebas con audio sintético (no requiere archivos reales):
+
+```sh
+pip install -r requirements-dev.txt
+python -m pytest tests
+```
 
 ## Pantallazo de la Aplicación
 ![Pantallazo de la Aplicación](Truepeak.png)
