@@ -1,4 +1,5 @@
 import io
+import os
 from datetime import datetime
 
 from reportlab.lib.pagesizes import letter
@@ -10,6 +11,7 @@ from ..viz import plots
 MARGIN = 40
 LINE_H = 16
 TITLE_FONT = "Helvetica-Bold"
+LOGO_HEIGHT = 34
 
 
 def _format(value, decimals=2):
@@ -74,12 +76,37 @@ class _PdfWriter:
         self.p.save()
 
 
-def export_pdf(results, album=None):
+def _brand_header(w, brand):
+    """Draw brand block: optional logo right-aligned + brand name as title."""
+    name = (brand or {}).get("name") or ""
+    logo = (brand or {}).get("logo") or ""
+    title = f"{name} - Mastering QC Report" if name else "TRUEPEAK - Mastering QC Report"
+    if logo and os.path.isfile(logo):
+        try:
+            img = ImageReader(logo)
+            iw, ih = img.getSize()
+            width = LOGO_HEIGHT * (iw / ih)
+            w.p.drawImage(
+                img,
+                w.width - MARGIN - width,
+                w.y - LOGO_HEIGHT + 6,
+                width=width,
+                height=LOGO_HEIGHT,
+                mask="auto",
+            )
+        except Exception:
+            pass
+    w.text(title, 18, bold=True)
+    if name:
+        w.text("Powered by TruePeak", size=8)
+
+
+def export_pdf(results, album=None, brand=None):
     buffer = io.BytesIO()
     w = _PdfWriter(buffer)
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
 
-    w.text("TRUEPEAK - Mastering QC Report", 18, bold=True)
+    _brand_header(w, brand)
     w.text(f"Generated: {now}")
     w.text(f"Tracks analyzed: {len(results)}")
     w.text("")

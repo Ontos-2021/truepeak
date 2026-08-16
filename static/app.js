@@ -398,6 +398,97 @@ function showError(message) {
 }
 
 function submitAnalysis() {
+    if ($("localMode").checked && window.TruePeakDSP) {
+        submitAnalysisLocal().catch((err) => {
+            console.warn("Local analysis failed, falling back to server upload:", err);
+            setStatus("Browser analysis unavailable (" + err.message + "). Uploading to server...");
+            submitAnalysisUpload();
+        });
+        return;
+    }
+    submitAnalysisUpload();
+}
+
+let _platformsPromise = null;
+function fetchPlatforms() {
+    if (!_platformsPromise) {
+        _platformsPromise = fetch("/api/targets")
+            .then((resp) => (resp.ok ? resp.json() : { platforms: [] }))
+            .then((data) => data.platforms || [])
+            .catch(() => []);
+    }
+    return _platformsPromise;
+}
+
+function setLocalProgress(frac, label) {
+    $("progressWrap").classList.remove("hidden");
+    const bar = $("progressBar");
+    bar.classList.remove("busy");
+    bar.style.width = Math.round(frac * 100) + "%";
+    if (label) setStatus(label);
+}
+
+async function decodeFile(file) {
+    const buffer = await file.arrayBuffer();
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) throw new Error("Web Audio API not supported");
+    const ctx = new AudioCtx();
+    try {
+        const decoded = await ctx.decodeAudioData(buffer);
+        const channels = [];
+        for (let ch = 0; ch < decoded.numberOfChannels; ch++) {
+            channels.push(decoded.getChannelData(ch));
+        }
+        return { channels, sampleRate: decoded.sampleRate };
+    } finally {
+        ctx.close();
+    }
+}
+
+async function analyzeLocally(file, onProgress) {
+    const { channels, sampleRate } = await decodeFile(file);
+    const result = await TruePeakDSP.analyzeBuffer(channels, sampleRate, onProgress);
+    result.filename = file.name;
+    result.engine = "browser";
+    return result;
+}
+
+async function submitAnalysisLocal() {
+    setBusy(true);
+    try {
+        const platforms = await fetchPlatforms();
+        const results = [];
+        for (let i = 0; i < state.files.length; i++) {
+            const entry = state.files[i];
+            const base = i / state.files.length;
+            const span = 1 / state.files.length;
+            setStatus("Analyzing locally " + (i + 1) + "/" + state.files.length + ": " + entry.file.name);
+            try {
+                const result = await analyzeLocally(entry.file, (frac, phase) => {
+                    setLocalProgress(base + frac * span, phase ? "Phase: " + phase : null);
+                });
+                result.verdicts = TruePeakDSP.buildVerdicts(result.analysis, platforms);
+                results.push(result);
+            } catch (err) {
+                results.push({ filename: entry.file.name, error: String(err.message || err) });
+            }
+        }
+        state.payload = {
+            results,
+            album: TruePeakDSP.albumSummary(results),
+        };
+        state.activeIndex = 0;
+        setLocalProgress(1, "Done");
+        setBusy(false);
+        renderAll();
+        if ($("autoPdf").checked) downloadPdf();
+    } catch (err) {
+        setBusy(false);
+        throw err;
+    }
+}
+
+function submitAnalysisUpload() {
     const formData = new FormData();
     for (const entry of state.files) formData.append("file", entry.file, entry.file.name);
     const xhr = new XMLHttpRequest();
@@ -542,11 +633,11 @@ function renderTrack(index) {
     let html = `<div class="panel card">
         <div class="track-title">
             <h2>${esc(result.filename)}</h2>
-            <span class="track-meta">${result.duration_s.toFixed(1)} s &middot; ${result.sample_rate} Hz &middot; ${result.channels} ch</span>
+            <span class="track-meta">${result.duration_s.toFixed(1)} s &middot; ${result.sample_rate} Hz &middot; ${result.channels} ch${result.engine ? " &middot; " + result.engine + " engine" : ""}</span>
         </div>
         <div class="metrics-grid">`;
     for (const [key, label, unit] of metrics) {
-        const value = a[key];
+        const value = key === "duration_s" ? result.duration_s : a[key];
         const cls = metricClass(key, value);
         const display = key === "phase_correlation"
             ? (value === null || value === undefined ? "N/A" : value.toFixed(3))
@@ -706,26 +797,37 @@ function downloadCsv() {
 /* ---------------- reference track ---------------- */
 
 function analyzeReference(file) {
-    const formData = new FormData();
-    formData.append("file", file, file.name);
     const status = $("refStatus");
     status.classList.remove("hidden");
     status.textContent = "Analyzing reference...";
+    const applyResult = (result) => {
+        if (!result || result.error) {
+            status.textContent = "Reference analysis failed";
+            return;
+        }
+        state.reference = result;
+        status.textContent = "Reference: " + shortName(result.filename, 20);
+        if (state.payload) {
+            renderTrack(state.activeIndex);
+            renderAlbum(state.payload);
+        }
+    };
+    if ($("localMode").checked && window.TruePeakDSP) {
+        analyzeLocally(file, null)
+            .then(applyResult)
+            .catch(() => analyzeReferenceUpload(file, applyResult));
+        return;
+    }
+    analyzeReferenceUpload(file, applyResult);
+}
+
+function analyzeReferenceUpload(file, applyResult) {
+    const status = $("refStatus");
+    const formData = new FormData();
+    formData.append("file", file, file.name);
     fetch("/analyze", { method: "POST", body: formData })
         .then((resp) => resp.json())
-        .then((data) => {
-            const result = data.results && data.results[0];
-            if (!result || result.error) {
-                status.textContent = "Reference analysis failed";
-                return;
-            }
-            state.reference = result;
-            status.textContent = "Reference: " + shortName(result.filename, 20);
-            if (state.payload) {
-                renderTrack(state.activeIndex);
-                renderAlbum(state.payload);
-            }
-        })
+        .then((data) => applyResult(data.results && data.results[0]))
         .catch(() => { status.textContent = "Reference analysis failed"; });
 }
 

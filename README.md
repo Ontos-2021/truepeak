@@ -23,17 +23,24 @@ referencia, reportes PDF/CSV y normalización a target.
   con tolerancia ±0.1 LU frente a pyloudnorm y los archivos de prueba ITU.
 
 ### QC orientado al flujo de mastering
+- **Análisis en el navegador (opción por defecto)**: el motor DSP completo está
+  portado a JavaScript (`static/dsp.js`) y corre 100% local con Web Audio
+  (`decodeAudioData`). Los archivos **no se suben al servidor** — ideal para
+  masters largos o confidenciales. Si el navegador no puede decodificar o
+  analizar, cae automáticamente al modo subida.
 - **Veredictos por plataforma**: Spotify, Apple Music, YouTube, Tidal,
   Amazon Music (-2 dBTP), Deezer, SoundCloud, EBU R128 y ATSC A/85, con la
   ganancia de reproducción estimada ("Spotify te bajará 3.4 dB") y estado de
-  true peak (OK / excede).
+  true peak (OK / excede). Se calculan en el cliente desde `/api/targets`.
 - **Timeline de loudness** (momentary + short-term + integrado + línea de
   target) y **waveform** renderizados en el navegador.
 - **Vista de álbum/lote**: spread de LUFS, TP máximo, LRA promedio y gráficos
   comparativos entre tracks.
-- **Track de referencia**: analiza un tema de referencia y superpone su
-  espectro promedio y su timeline de loudness sobre el track en análisis.
-- **Reporte PDF** (por track + resumen de álbum) y **CSV** exportables.
+- **Track de referencia**: analiza un tema de referencia (localmente si es
+  posible) y superpone su espectro promedio y su timeline de loudness sobre el
+  track en análisis.
+- **Reporte PDF con branding del estudio** (logo + nombre del estudio vía
+  variables de entorno) y **CSV** exportables.
 
 ### Procesamiento
 - **Normalización a target LUFS** con techo de true peak: ganancia segura,
@@ -76,11 +83,13 @@ Abre `http://127.0.0.1:5000`.
 ## Uso
 1. Arrastra uno o varios masters (WAV, MP3, FLAC, OGG, AIFF). Varios archivos =
    lote de álbum con comparación entre tracks.
-2. *Analyze*: se muestran métricas calibradas, veredictos por plataforma,
-   timeline de loudness, waveform y espectro promedio.
+2. *Analyze*: por defecto el análisis corre **en tu navegador** (sin subir
+   audio). Desmarca "Analyze in browser (no upload)" para usar el servidor.
+   Se muestran métricas calibradas, veredictos por plataforma, timeline de
+   loudness, waveform y espectro promedio.
 3. Opcional: agrega un track de referencia para superponer espectro/timeline.
 4. *Normalize to target*: elige LUFS objetivo y techo de true peak para
-   exportar un WAV 24-bit ajustado.
+   exportar un WAV 24-bit ajustado (requiere subir el archivo).
 5. *Download PDF Report* / *Download CSV Data* para el reporte de QC.
 
 Casos especiales:
@@ -109,13 +118,15 @@ Casos especiales:
 | `TRUEPEAK_HOST` | `127.0.0.1` | Host del servidor. |
 | `TRUEPEAK_PORT` | `5000` | Puerto. |
 | `TRUEPEAK_TEMP_DIR` | `./temp` | Directorio de archivos temporales. |
-| `TRUEPEAK_MAX_UPLOAD_MB` | `200` | Límite de subida por request. |
-| `TRUEPEAK_MAX_DURATION_MINUTES` | `30` | Duración máxima por archivo analizado. |
-| `TRUEPEAK_MAX_NORMALIZE_MINUTES` | `20` | Duración máxima al normalizar. |
+| `TRUEPEAK_MAX_UPLOAD_MB` | `2048` | Límite de subida por request. |
+| `TRUEPEAK_MAX_DURATION_MINUTES` | `180` | Duración máxima por archivo analizado. |
+| `TRUEPEAK_MAX_NORMALIZE_MINUTES` | `180` | Duración máxima al normalizar. |
 | `TRUEPEAK_RATE_LIMIT` | `1` | Habilita el rate limiting (0 = off). |
 | `TRUEPEAK_RATE_MAX_CALLS` | `10` | Máximo de llamadas por ventana. |
 | `TRUEPEAK_RATE_PER_SECONDS` | `60` | Ventana del rate limit en segundos. |
 | `TRUEPEAK_NORMALIZE_TTL_SECONDS` | `600` | TTL de descargas normalizadas. |
+| `TRUEPEAK_BRAND_NAME` | *(vacío)* | Nombre del estudio para la interfaz y los reportes PDF (ej. `Mi Estudio`). |
+| `TRUEPEAK_BRAND_LOGO` | *(vacío)* | Ruta a un PNG con el logo del estudio (aparece en el PDF). |
 
 ## Tests
 
@@ -125,8 +136,11 @@ python -m pytest tests -q
 ```
 
 La suite incluye tests de calibración (señales de amplitud/frecuencia
-conocidas, picos inter-muestra, gating, LRA, correlación, clipping, DC) y
-tests de API (análisis, exportaciones, normalización, rate limit, limpieza).
+conocidas, picos inter-muestra, gating, LRA, correlación, clipping, DC),
+tests de **paridad JS vs Python** (el motor del navegador produce los mismos
+valores: loudness ±0.05 LU, true peak ±0.05 dB, espectro ±0.5 dB; requieren
+`node` en el PATH) y tests de API (análisis, exportaciones, branding del PDF,
+normalización, rate limit, limpieza).
 
 ## Estructura
 
@@ -138,15 +152,13 @@ truepeak/
   viz/          # matplotlib (solo para el PDF; el navegador renderiza con canvas)
   config.py     # configuración por variables de entorno
 templates/      # frontend (sin dependencias externas)
-static/         # CSS y JS (charts en canvas)
-tests/          # suite con audio sintético
+static/         # CSS, app.js (UI) y dsp.js (motor DSP JS — análisis local sin subir audio)
+tests/          # suite con audio sintético + paridad JS vs Python
 ```
 
 ## Hoja de ruta (fuera de alcance actual)
 - Cuentas e historial de análisis (SaaS freemium).
-- Port del motor DSP a WASM/Web Audio para análisis 100% local
-  ("tu audio nunca sale del dispositivo").
-- Reportes PDF con branding del estudio.
+- Despliegue público en la nube.
 
 ## Licencia
 MIT.

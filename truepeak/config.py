@@ -37,4 +37,7 @@ class Config:
     MAX_DURATION_MINUTES = _env_float("TRUEPEAK_MAX_DURATION_MINUTES", 180.0)
     MAX_NORMALIZE_DURATION_MINUTES = _env_float("TRUEPEAK_MAX_NORMALIZE_MINUTES", 180.0)
     NORMALIZE_TOKEN_TTL_SECONDS = _env_int("TRUEPEAK_NORMALIZE_TTL_SECONDS", 600)
+    # Branding for reports/UI (own-studio white label).
+    BRAND_NAME = os.environ.get("TRUEPEAK_BRAND_NAME", "")
+    BRAND_LOGO = os.environ.get("TRUEPEAK_BRAND_LOGO", "")
     TESTING = False

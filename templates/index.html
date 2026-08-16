@@ -12,7 +12,7 @@
         <div class="brand">
             <span class="logo">TP</span>
             <div>
-                <h1>TruePeak</h1>
+                <h1>{{ brand_name or 'TruePeak' }}</h1>
                 <p>Mastering QC &mdash; loudness, dynamics, stereo and platform readiness</p>
             </div>
         </div>
@@ -44,10 +44,16 @@
             </div>
             <ul id="fileList" class="file-list"></ul>
             <div class="row-between">
-                <label class="check">
-                    <input type="checkbox" id="autoPdf">
-                    Auto-download PDF report after analysis
-                </label>
+                <div class="row" style="gap:18px">
+                    <label class="check">
+                        <input type="checkbox" id="localMode" checked>
+                        Analyze in browser (no upload)
+                    </label>
+                    <label class="check">
+                        <input type="checkbox" id="autoPdf">
+                        Auto-download PDF report after analysis
+                    </label>
+                </div>
                 <button id="analyzeBtn" class="btn primary" disabled>Analyze</button>
             </div>
             <div id="progressWrap" class="progress hidden">
@@ -78,6 +84,7 @@
         </footer>
     </main>
 
+    <script src="/static/dsp.js"></script>
     <script src="/static/app.js"></script>
 </body>
 </html>

@@ -32,7 +32,11 @@ def create_app(config_overrides=None):
         "RATE_LIMIT_PER_SECONDS": cfg.RATE_LIMIT_PER_SECONDS,
         "MAX_DURATION_MINUTES": cfg.MAX_DURATION_MINUTES,
         "MAX_NORMALIZE_DURATION_MINUTES": cfg.MAX_NORMALIZE_DURATION_MINUTES,
+        "BRAND_NAME": cfg.BRAND_NAME,
+        "BRAND_LOGO": cfg.BRAND_LOGO,
         "TOKEN_STORE": None,
+        # Local tool: always serve fresh assets so the UI never goes stale.
+        "SEND_FILE_MAX_AGE_DEFAULT": 0,
     })
     if config_overrides:
         app.config.update(config_overrides)

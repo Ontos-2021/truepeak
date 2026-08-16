@@ -107,7 +107,10 @@ def _album_summary(results):
 
 @bp.route("/")
 def index():
-    return render_template("index.html")
+    return render_template(
+        "index.html",
+        brand_name=current_app.config.get("BRAND_NAME", ""),
+    )
 
 
 @bp.route("/health")
@@ -179,7 +182,11 @@ def export_pdf_route():
         if not isinstance(results, list) or not results:
             return jsonify({"error": "Invalid export data"}), 400
         album = payload.get("album")
-        pdf_buffer = export_pdf(results, album)
+        brand = {
+            "name": current_app.config.get("BRAND_NAME", ""),
+            "logo": current_app.config.get("BRAND_LOGO", ""),
+        }
+        pdf_buffer = export_pdf(results, album, brand=brand)
         return send_file(
             pdf_buffer,
             mimetype="application/pdf",
