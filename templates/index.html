@@ -10,6 +10,10 @@
         .hidden {
             display: none;
         }
+        #errorMessage {
+            color: red;
+            margin-top: 10px;
+        }
     </style>
 </head>
 
@@ -23,8 +27,10 @@
                         <label for="file" class="form-label">Upload your audio files (WAV or MP3):</label>
                         <input type="file" class="form-control" id="file" name="file" multiple required accept=".wav,.mp3">
                     </div>
-                    <button type="submit" class="btn btn-primary">Analyze</button>
+                    <button type="submit" class="btn btn-primary" id="analyzeBtn">Analyze</button>
                 </form>
+                
+                <div id="errorMessage" class="hidden"></div>
 
                 <div id="progressBar" class="progress mb-3 hidden">
                     <div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%"></div>
@@ -48,39 +54,74 @@
         document.getElementById('uploadForm').addEventListener('submit', function(e) {
             e.preventDefault();
             const formData = new FormData(this);
-
+            const errorDiv = document.getElementById('errorMessage');
+            errorDiv.classList.add('hidden');
+            errorDiv.textContent = '';
+            
+            // Show progress bar with indeterminate state
+            const progressBar = document.querySelector('.progress-bar');
+            document.getElementById('progressBar').classList.remove('hidden');
+            progressBar.style.width = '100%';
+            progressBar.textContent = 'Processing...';
+            
+            // Disable button and show loading state
+            const analyzeBtn = document.getElementById('analyzeBtn');
+            analyzeBtn.disabled = true;
+            analyzeBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Processing...';
+            
+            console.log("Submitting form...");
+            
             fetch('/', {
                 method: 'POST',
                 body: formData
             })
             .then(response => {
+                console.log("Response status:", response.status);
+                
+                if (response.status === 413) {
+                    throw new Error("File too large. Please upload smaller files.");
+                }
+                
+                // Handle non-JSON responses
+                const contentType = response.headers.get("content-type");
+                if (!contentType || !contentType.includes("application/json")) {
+                    throw new Error(`Server returned an invalid response (${response.status}). Please try again later.`);
+                }
+                
                 if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
+                    return response.json().then(data => {
+                        throw new Error(data.error || `HTTP error! status: ${response.status}`);
+                    }).catch(err => {
+                        // If JSON parsing fails
+                        throw new Error(`Server error (${response.status}). Please contact support.`);
+                    });
                 }
                 return response.json();
             })
             .then(data => {
-                if (data.task_id) {
-                    document.getElementById('progressBar').classList.remove('hidden');
-                    checkTaskStatus(data.task_id);
-                }
+                console.log("Response data:", data);
+                displayResults(data);
             })
-            .catch(error => console.error('Error:', error));
+            .catch(error => {
+                console.error('Error:', error);
+                showError(error.message);
+            })
+            .finally(() => {
+                // Re-enable button and restore original text
+                analyzeBtn.disabled = false;
+                analyzeBtn.textContent = 'Analyze';
+            });
         });
-
-        function checkTaskStatus(taskId) {
-            fetch(`/status/${taskId}`)
-            .then(response => response.json())
-            .then(data => {
-                updateProgressBar(data.state, data.current, data.total);
-                if (data.state === 'SUCCESS') {
-                    displayResults(data.result);
-                } else if (data.state !== 'FAILURE') {
-                    setTimeout(() => checkTaskStatus(taskId), 1000);
-                }
-            })
-            .catch(error => console.error('Error:', error));
+        
+        function showError(message) {
+            const errorDiv = document.getElementById('errorMessage');
+            errorDiv.textContent = message;
+            errorDiv.classList.remove('hidden');
+            // Hide progress bar
+            document.getElementById('progressBar').classList.add('hidden');
         }
+
+        // Remove the checkTaskStatus function as we no longer use Celery
 
         function updateProgressBar(state, current, total) {
             const progressBar = document.querySelector('.progress-bar');
