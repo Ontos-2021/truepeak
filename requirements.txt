@@ -27,19 +27,15 @@ msgpack==1.0.8
 numba==0.60.0
 numpy==2.0.1
 packaging==24.1
-pandas==2.2.2
 pillow==10.4.0
 platformdirs==4.2.2
 pooch==1.8.2
 pycparser==2.22
-pydub==0.25.1
-pyloudnorm==0.1.1
 pyparsing==3.1.2
 python-dateutil==2.9.0.post0
 pytz==2024.1
 reportlab==4.2.2
 requests==2.32.3
-scikit-learn==1.5.1
 scipy==1.13.1
 six==1.16.0
 soundfile==0.12.1
@@ -48,5 +44,7 @@ threadpoolctl==3.5.0
 typing_extensions==4.12.2
 tzdata==2024.1
 urllib3==2.2.2
+waitress==3.0.0
 Werkzeug==3.0.3
 zipp==3.19.2
+pedalboard==0.9.19

@@ -1,9 +1,13 @@
 *.wav
 *.mp3
+*.flac
+*.ogg
+*.aiff
 .idea
 env
 __pycache__
+.pytest_cache
+.ruff_cache
 /temp
 /tmp
-/static
-.pytest_cache
+/static/old

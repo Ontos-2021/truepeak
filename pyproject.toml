@@ -1,0 +1,8 @@
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+exclude = ["env", "temp", "tests/data"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["E501"]
